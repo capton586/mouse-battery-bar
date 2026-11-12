@@ -21,7 +21,8 @@ https://github.com/capton586/mouse-battery-bar
 
 请先打开或克隆上述仓库，阅读 docs/adapt.md，识别我的鼠标并取得一次可确认属于它的真实电量。
 只适配这只鼠标，使用 macOS 原生接口，无需厂商驱动。将型号相关逻辑放进 src/MouseProfile.m，
-保留默认 5 分钟采样和上次成功读取的时间。请构建 .app、实机验证，并给我源码和复现命令。
+保留默认 5 分钟采样和上次成功读取的时间。请运行 scripts/dmg.sh 构建 .app，并将同一份 .app 打包为个人 .dmg。交付两者、源码和复现命令。
+请从 .dmg 将应用安装到「应用程序」，从那里启动，在菜单栏确认一次真实电量并记录结果。
 若设备没有上报可验证的电量，请说明卡在哪一步。
 ```
 
@@ -30,12 +31,14 @@ https://github.com/capton586/mouse-battery-bar
 需要 macOS 13 或更高版本，以及 Apple Command Line Tools（可用 `xcode-select --install` 安装）。在仓库目录执行：
 
 ```sh
-./scripts/build.sh
-"build/Mouse Battery Bar.app/Contents/MacOS/MouseBatteryBar" --print
-open "build/Mouse Battery Bar.app"
+./scripts/dmg.sh
 ```
 
-`--print` 读取一次电量；`--status` 还会显示设备提供的 DPI。点击菜单栏的鼠标图标可以立即刷新、调整采样间隔或开启登录启动。采样失败时图标显示「—」，菜单内保留上次成功读数和时间。有些接收器也会被 macOS 识别为键盘，系统可能要求在「隐私与安全性 → 输入监控」中允许该应用并重启。
+脚本在 `build/` 中生成 **Mouse Battery Bar.app** 和包含它的 **MouseBatteryBar-版本号.dmg**。打开 DMG，将应用拖入「应用程序」，推出 DMG，再从「应用程序」启动。点鼠标图标的「立即刷新」，确认菜单里出现电量和新的读取时间。
+
+若提示权限不足，在「系统设置 → 隐私与安全性 → 输入监控」允许刚安装的 **Mouse Battery Bar**，按提示退出并重新打开。此前给终端或旧版应用的授权可能不适用于安装版。若提示安全输入正在使用，完成密码输入、离开密码框，再移动鼠标并刷新。采样失败时菜单内会保留上次成功读数和时间。
+
+调试时，可执行 `"/Applications/Mouse Battery Bar.app/Contents/MacOS/MouseBatteryBar" --print` 读取一次电量。`--status` 还会显示设备提供的 DPI。安装验收以菜单栏里实际显示的新读数为准。
 
 ## 示例与发布
 

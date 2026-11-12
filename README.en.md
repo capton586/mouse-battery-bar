@@ -22,7 +22,8 @@ to build a macOS menu bar battery app for my [brand and full model] connected vi
 Open or clone that repository, read docs/adapt.en.md, identify my mouse, and verify one fresh battery
 reading from that specific device. Build for this mouse using native macOS interfaces without a vendor driver.
 Keep device-specific logic in src/MouseProfile.m, the five-minute default interval, and the time of the last
-successful reading. Build the .app, test it on my hardware, and give me the source and reproducible commands.
+successful reading. Run scripts/dmg.sh to build the .app and package that same app in a personal .dmg. Deliver both, the source, and reproducible commands.
+Install the app from the DMG into Applications, launch it there, and verify a fresh battery reading in its menu.
 If the mouse exposes no verifiable battery data, tell me where verification stopped.
 ```
 
@@ -31,12 +32,14 @@ If the mouse exposes no verifiable battery data, tell me where verification stop
 On macOS 13 or later, install Apple's Command Line Tools (`xcode-select --install`) and run these commands from the repository directory.
 
 ```sh
-./scripts/build.sh
-"build/Mouse Battery Bar.app/Contents/MacOS/MouseBatteryBar" --print
-open "build/Mouse Battery Bar.app"
+./scripts/dmg.sh
 ```
 
-`--print` reads the battery once. Use `--status` to include DPI when the device reports it. Click the mouse icon to refresh, change the sampling interval, or enable launch at login. After a failed sample, the menu bar shows a dash and the menu retains the last successful reading and its time. For receivers that also identify as keyboards, macOS may ask you to enable the app in **Privacy & Security → Input Monitoring** and relaunch it.
+The script produces **Mouse Battery Bar.app** and **MouseBatteryBar-VERSION.dmg** in `build/`. Open the DMG, drag the app into Applications, eject the image, then launch the installed app. Choose Refresh from the mouse menu and check for a battery percentage with a new reading time.
+
+If access is denied, allow the installed **Mouse Battery Bar** in **System Settings → Privacy & Security → Input Monitoring**, then quit and reopen it. The terminal or an older build may have a separate permission. If secure input is active, finish entering your password, leave the password field, wake the mouse and refresh. After a failed sample, the menu retains the last successful reading and its time.
+
+For diagnostics, run `"/Applications/Mouse Battery Bar.app/Contents/MacOS/MouseBatteryBar" --print` for one sample, or use `--status` to include DPI when available. Verify installation with a fresh reading in the menu bar.
 
 ## Example and releases
 
