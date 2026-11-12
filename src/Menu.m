@@ -2,6 +2,10 @@
 #import "MouseProfile.h"
 #import <ServiceManagement/ServiceManagement.h>
 
+#ifdef VT9PRO_UPDATES
+#import <Sparkle/Sparkle.h>
+#endif
+
 @interface BatteryMenu : NSObject <NSApplicationDelegate, NSMenuDelegate>
 @end
 
@@ -12,6 +16,10 @@
     NSTimer *_timer;
     BOOL _reading, _screensAsleep;
     NSInteger _minutes;
+#ifdef VT9PRO_UPDATES
+    SPUStandardUpdaterController *_updates;
+    NSMenuItem *_checkUpdate, *_autoCheck, *_autoDownload;
+#endif
 }
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -52,6 +60,15 @@
     }
     _login = [menu addItemWithTitle:@"登录时启动" action:@selector(toggleLogin:) keyEquivalent:@""];
     _login.target = self;
+#ifdef VT9PRO_UPDATES
+    _updates = [[SPUStandardUpdaterController alloc] initWithStartingUpdater:YES updaterDelegate:nil userDriverDelegate:nil];
+    _checkUpdate = [menu addItemWithTitle:@"检查更新…" action:@selector(checkForUpdates:) keyEquivalent:@""];
+    _checkUpdate.target = _updates;
+    _autoCheck = [menu addItemWithTitle:@"自动检查更新" action:@selector(toggleUpdates:) keyEquivalent:@""];
+    _autoCheck.target = self;
+    _autoDownload = [menu addItemWithTitle:@"自动下载更新" action:@selector(toggleDownloads:) keyEquivalent:@""];
+    _autoDownload.target = self;
+#endif
     [menu addItem:NSMenuItem.separatorItem];
     NSMenuItem *quit = [menu addItemWithTitle:@"退出" action:@selector(terminate:) keyEquivalent:@"q"];
     quit.target = NSApp;
@@ -71,7 +88,21 @@
     [self scheduleTimer];
     [self sample:nil];
 }
+#ifdef VT9PRO_UPDATES
+- (void)toggleDownloads:(id)sender {
+    _updates.updater.automaticallyDownloadsUpdates = !_updates.updater.automaticallyDownloadsUpdates;
+}
+- (void)toggleUpdates:(id)sender {
+    _updates.updater.automaticallyChecksForUpdates = !_updates.updater.automaticallyChecksForUpdates;
+}
+#endif
 - (void)menuWillOpen:(NSMenu *)menu {
+#ifdef VT9PRO_UPDATES
+    _checkUpdate.enabled = _updates.updater.canCheckForUpdates;
+    _autoDownload.enabled = _updates.updater.allowsAutomaticUpdates;
+    _autoDownload.state = _updates.updater.automaticallyDownloadsUpdates ? NSControlStateValueOn : NSControlStateValueOff;
+    _autoCheck.state = _updates.updater.automaticallyChecksForUpdates ? NSControlStateValueOn : NSControlStateValueOff;
+#endif
     SMAppServiceStatus status = SMAppService.mainAppService.status;
     BOOL pending = status == SMAppServiceStatusRequiresApproval;
     _login.title = pending ? @"登录时启动（去系统设置允许…）" : @"登录时启动";
@@ -98,10 +129,14 @@
 - (void)showLastReading {
     NSDictionary *last = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"LastReading"];
     NSDate *date = last[@"date"];
-    if (![date isKindOfClass:NSDate.class] || ![last[@"percent"] isKindOfClass:NSNumber.class]) {
+    NSNumber *percent = last[@"percent"];
+    if (![date isKindOfClass:NSDate.class] || ![percent isKindOfClass:NSNumber.class] ||
+        percent.doubleValue < 0 || percent.doubleValue > 100 || percent.doubleValue != percent.integerValue) {
+        _item.button.title = @" —";
         _lastLine.title = @"尚无读数";
         return;
     }
+    _item.button.title = [NSString stringWithFormat:@" %@%%", percent];
     NSString *when = [NSDateFormatter localizedStringFromDate:date dateStyle:NSDateFormatterShortStyle
                                                     timeStyle:NSDateFormatterShortStyle];
     _lastLine.title = [NSString stringWithFormat:@"上次读数　%@%% · %@", last[@"percent"], when];
@@ -134,8 +169,6 @@
             self->_reading = NO;
             self->_refresh.enabled = YES;
             self->_privacy.hidden = ![error containsString:@"输入监控"];
-            NSString *title = error ? @" —" : [NSString stringWithFormat:@" %d%%", reading.percent];
-            self->_item.button.title = title;
             self->_stateLine.title = error ?: [NSString stringWithFormat:@"%@ · %d%%", MouseName(), reading.percent];
             self->_dpi.hidden = error || reading.dpi == 0;
             if (!self->_dpi.hidden)
