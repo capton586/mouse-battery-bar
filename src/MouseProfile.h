@@ -1,6 +1,10 @@
 #import <Foundation/Foundation.h>
 
-// Implement these in MouseProfile.m for the one mouse used by this build.
-// Return nil on success and set percent to a fresh value between 0 and 100.
+typedef struct {
+    int percent; // 0–100 on success
+    int dpi;     // 0 when unavailable
+} MouseReading;
+
 NSString *MouseName(void);
-NSString *ReadBattery(int *percent);
+// Returns nil only when a fresh device report populated reading.
+NSString *ReadBattery(MouseReading *reading);

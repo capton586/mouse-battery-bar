@@ -1,15 +1,16 @@
 #import <Cocoa/Cocoa.h>
 #import "MouseProfile.h"
+#import <ServiceManagement/ServiceManagement.h>
 
-@interface BatteryMenu : NSObject <NSApplicationDelegate>
+@interface BatteryMenu : NSObject <NSApplicationDelegate, NSMenuDelegate>
 @end
 
 @implementation BatteryMenu {
     NSStatusItem *_item;
-    NSMenuItem *_stateLine, *_lastLine, *_refresh, *_privacy;
+    NSMenuItem *_stateLine, *_lastLine, *_refresh, *_privacy, *_login, *_dpi;
     NSMenu *_intervalMenu;
     NSTimer *_timer;
-    BOOL _reading;
+    BOOL _reading, _screensAsleep;
     NSInteger _minutes;
 }
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -25,10 +26,14 @@
     button.title = @" —";
     NSMenu *menu = [NSMenu new];
     menu.autoenablesItems = NO;
+    menu.delegate = self;
     _stateLine = [menu addItemWithTitle:MouseName() action:nil keyEquivalent:@""];
     _stateLine.enabled = NO;
     _lastLine = [menu addItemWithTitle:@"" action:nil keyEquivalent:@""];
     _lastLine.enabled = NO;
+    _dpi = [menu addItemWithTitle:@"" action:nil keyEquivalent:@""];
+    _dpi.enabled = NO;
+    _dpi.hidden = YES;
     [self showLastReading];
     [menu addItem:NSMenuItem.separatorItem];
     _refresh = [menu addItemWithTitle:@"立即刷新" action:@selector(sample:) keyEquivalent:@""];
@@ -45,14 +50,50 @@
         choice.tag = minutes.integerValue;
         choice.target = self;
     }
+    _login = [menu addItemWithTitle:@"登录时启动" action:@selector(toggleLogin:) keyEquivalent:@""];
+    _login.target = self;
     [menu addItem:NSMenuItem.separatorItem];
     NSMenuItem *quit = [menu addItemWithTitle:@"退出" action:@selector(terminate:) keyEquivalent:@"q"];
     quit.target = NSApp;
     _item.menu = menu;
     [self scheduleTimer];
-    [NSWorkspace.sharedWorkspace.notificationCenter addObserver:self selector:@selector(sample:)
-            name:NSWorkspaceDidWakeNotification object:nil];
+    NSNotificationCenter *workspace = NSWorkspace.sharedWorkspace.notificationCenter;
+    [workspace addObserver:self selector:@selector(screensSleep:) name:NSWorkspaceScreensDidSleepNotification object:nil];
+    [workspace addObserver:self selector:@selector(screensWake:) name:NSWorkspaceScreensDidWakeNotification object:nil];
     [self sample:nil];
+}
+- (void)screensSleep:(NSNotification *)note {
+    _screensAsleep = YES;
+    [_timer invalidate];
+}
+- (void)screensWake:(NSNotification *)note {
+    _screensAsleep = NO;
+    [self scheduleTimer];
+    [self sample:nil];
+}
+- (void)menuWillOpen:(NSMenu *)menu {
+    SMAppServiceStatus status = SMAppService.mainAppService.status;
+    BOOL pending = status == SMAppServiceStatusRequiresApproval;
+    _login.title = pending ? @"登录时启动（去系统设置允许…）" : @"登录时启动";
+    _login.state = pending ? NSControlStateValueMixed :
+                   status == SMAppServiceStatusEnabled ? NSControlStateValueOn : NSControlStateValueOff;
+}
+- (void)toggleLogin:(id)sender {
+    SMAppService *service = SMAppService.mainAppService;
+    if (service.status == SMAppServiceStatusRequiresApproval) {
+        [SMAppService openSystemSettingsLoginItems];
+        return;
+    }
+    NSError *error = nil;
+    BOOL ok = service.status == SMAppServiceStatusEnabled
+            ? [service unregisterAndReturnError:&error]
+            : [service registerAndReturnError:&error];
+    if (!ok) {
+        NSAlert *alert = [NSAlert new];
+        alert.messageText = @"无法更改登录项";
+        alert.informativeText = [NSString stringWithFormat:@"请先将应用放入「应用程序」并从那里打开。也可以在「系统设置 → 通用 → 登录项」中手动添加或移除。\n%@", error.localizedDescription ?: @""];
+        [alert runModal];
+    }
 }
 - (void)showLastReading {
     NSDictionary *last = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"LastReading"];
@@ -82,22 +123,25 @@
     [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
 }
 - (void)sample:(id)sender {
-    if (_reading) return;
+    if (_reading || _screensAsleep) return;
     _reading = YES;
     _refresh.enabled = NO;
     _stateLine.title = [MouseName() stringByAppendingString:@" · 正在读取…"];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        int percent = -1;
-        NSString *error = ReadBattery(&percent);
+        MouseReading reading;
+        NSString *error = ReadBattery(&reading);
         dispatch_async(dispatch_get_main_queue(), ^{
             self->_reading = NO;
             self->_refresh.enabled = YES;
             self->_privacy.hidden = ![error containsString:@"输入监控"];
-            NSString *title = error ? @" —" : [NSString stringWithFormat:@" %d%%", percent];
+            NSString *title = error ? @" —" : [NSString stringWithFormat:@" %d%%", reading.percent];
             self->_item.button.title = title;
-            self->_stateLine.title = error ?: [NSString stringWithFormat:@"%@ · %d%%", MouseName(), percent];
+            self->_stateLine.title = error ?: [NSString stringWithFormat:@"%@ · %d%%", MouseName(), reading.percent];
+            self->_dpi.hidden = error || reading.dpi == 0;
+            if (!self->_dpi.hidden)
+                self->_dpi.title = [NSString stringWithFormat:@"当前 DPI　%d", reading.dpi];
             if (!error) {
-                [NSUserDefaults.standardUserDefaults setObject:@{@"percent": @(percent), @"date": NSDate.date}
+                [NSUserDefaults.standardUserDefaults setObject:@{@"percent": @(reading.percent), @"date": NSDate.date}
                                                        forKey:@"LastReading"];
             }
             [self showLastReading];
@@ -109,11 +153,12 @@
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
-        if (argc == 2 && strcmp(argv[1], "--print") == 0) {
-            int percent = -1;
-            NSString *error = ReadBattery(&percent);
+        if (argc == 2 && (!strcmp(argv[1], "--print") || !strcmp(argv[1], "--status"))) {
+            MouseReading reading;
+            NSString *error = ReadBattery(&reading);
             if (error) { fprintf(stderr, "%s\n", error.UTF8String); return 1; }
-            printf("%d%%\n", percent);
+            printf("%d%%\n", reading.percent);
+            if (!strcmp(argv[1], "--status") && reading.dpi > 0) printf("DPI: %d\n", reading.dpi);
             return 0;
         }
         NSApplication *app = NSApplication.sharedApplication;

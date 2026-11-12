@@ -3,17 +3,20 @@
 NSString *MouseName(void) { return @"VT9PRO"; }
 #import <IOKit/hid/IOHIDLib.h>
 
-typedef struct { int percent; } Reading;
+
 static void onReport(void *context, IOReturn result, void *sender,
                      IOHIDReportType type, uint32_t reportID, uint8_t *bytes, CFIndex count) {
     if (result != kIOReturnSuccess || reportID != 0xbb) return;
     if (count == 7 && bytes[0] == reportID) { bytes++; count--; }
     if (count != 6 || bytes[0] != 0xb0 || bytes[5] > 100) return;
-    ((Reading *)context)->percent = bytes[5];
+    MouseReading *reading = context;
+    reading->percent = bytes[5];
+    reading->dpi = bytes[2] | (bytes[3] << 8);
     CFRunLoopStop(CFRunLoopGetCurrent());
 }
 
-NSString *ReadBattery(int *percent) {
+NSString *ReadBattery(MouseReading *reading) {
+    *reading = (MouseReading){.percent = -1};
     NSDictionary *match = @{@"VendorID": @0x24ae, @"ProductID": @0x185a, @"PrimaryUsage": @6};
     IOHIDManagerRef manager = IOHIDManagerCreate(NULL, 0);
     IOHIDManagerSetDeviceMatching(manager, (__bridge CFDictionaryRef)match);
@@ -29,15 +32,13 @@ NSString *ReadBattery(int *percent) {
             continue;
         }
         uint8_t buffer[64] = {};
-        Reading reading = {.percent = -1};
-        IOHIDDeviceRegisterInputReportCallback(device, buffer, sizeof(buffer), onReport, &reading);
+        IOHIDDeviceRegisterInputReportCallback(device, buffer, sizeof(buffer), onReport, reading);
         CFRunLoopRef loop = CFRunLoopGetCurrent();
         IOHIDDeviceScheduleWithRunLoop(device, loop, kCFRunLoopDefaultMode);
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 14, false);
         IOHIDDeviceUnscheduleFromRunLoop(device, loop, kCFRunLoopDefaultMode);
         IOHIDDeviceClose(device, 0);
-        *percent = reading.percent;
-        message = reading.percent >= 0 ? nil : @"接收器没有发来新的电量。请移动鼠标唤醒，再点「立即刷新」。";
+        message = reading->percent >= 0 ? nil : @"接收器没有发来新的电量。请移动鼠标唤醒，再点「立即刷新」。";
         break;
     }
     CFRelease(manager);
